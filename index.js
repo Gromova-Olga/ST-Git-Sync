@@ -331,6 +331,13 @@ async function executeSyncAction(action, token) {
                     const rawData = await pfs.readFile(`${dir}/characters/${char.avatar}`);
                     const uint8Array = rawData instanceof Uint8Array ? rawData : new Uint8Array(Object.values(rawData));
 
+                    // ВОЗВРАЩАЕМ УДАЛЕНИЕ СТАРОЙ ВЕРСИИ ПЕРЕД ИМПОРТОМ
+                    await fetch('/api/characters/delete', {
+                        method: 'POST',
+                        headers: jsonHeaders,
+                        body: JSON.stringify({ avatar_url: char.avatar })
+                    }).catch(() => {});
+
                     const fd = new FormData();
                     fd.append('avatar', new Blob([uint8Array]), char.avatar);
                     fd.append('file_type', char.avatar.endsWith('.webp') ? 'webp' : 'png');
