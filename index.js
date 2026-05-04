@@ -1,7 +1,7 @@
 import { extension_settings } from '../../../extensions.js';
 import { saveSettingsDebounced, getRequestHeaders } from '../../../../script.js';
 
-const extensionName = 'github-sync';
+const extensionName = 'ST-Git-Sync';
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
 let sessionToken = null;
