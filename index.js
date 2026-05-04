@@ -211,12 +211,20 @@ async function initExtension() {
     });
 
     $('#sync-pull-btn').on('click', async () => {
+        // Добавляем предупреждение
+        const confirmed = confirm(
+            "⚠️ ВНИМАНИЕ!\n\n" +
+            "Загрузка данных (Pull) перезапишет ваши локальные карточки и миры версиями из GitHub.\n\n" +
+            "Если вы вносили изменения прямо в Таверне, сначала нажмите 'Отправить (Push)', иначе ваши изменения будут потеряны!\n\n" +
+            "Вы уверены, что хотите продолжить загрузку?"
+        );
+        if (!confirmed) return; // Если нажали "Отмена", прерываем процесс
+
         const token = await getToken();
         if (!token) return;
         if (!(await validateGitHubToken(token))) return;
         executeSyncAction('pull', token);
     });
-
     $('#sync-push-btn').on('click', async () => {
         const token = await getToken();
         if (!token) return;
@@ -320,25 +328,37 @@ async function executeSyncAction(action, token) {
             let charsData = JSON.parse(charsFile);
             if (!Array.isArray(charsData)) charsData = Object.values(charsData);
 
-            // Валидация: пропускаем персонажей с подозрительными данными
             const validChars = charsData.filter(validateCharacter);
             if (validChars.length !== charsData.length) {
                 toastr.warning(`Пропущено ${charsData.length - validChars.length} персонажей с некорректными данными`);
             }
+
+            // НОВОВВЕДЕНИЕ: Получаем список текущих локальных персонажей для умной сверки
+            let localChars = [];
+            try {
+                const localReq = await fetch('/api/characters/all', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({}) });
+                if (localReq.ok) localChars = await localReq.json();
+            } catch (e) { console.warn("[ST-Git-Sync] Не удалось получить локальных персонажей", e); }
 
             for (const char of validChars) {
                 try {
                     const rawData = await pfs.readFile(`${dir}/characters/${char.avatar}`);
                     const uint8Array = rawData instanceof Uint8Array ? rawData : new Uint8Array(Object.values(rawData));
 
+                    // Ищем локального персонажа с ТАКИМ ЖЕ ИМЕНЕМ (даже если файл называется иначе)
+                    const existingChar = localChars.find(c => c.name === char.name);
+                    
+                    // Если нашли совпадение по имени — удаляем его локальный файл. Иначе пробуем удалить файл с именем из гитхаба.
+                    const fileToDelete = existingChar ? existingChar.avatar : char.avatar;
+
                     // 1. Отправляем запрос на удаление
                     await fetch('/api/characters/delete', {
                         method: 'POST',
                         headers: jsonHeaders,
-                        body: JSON.stringify({ avatar_url: char.avatar })
+                        body: JSON.stringify({ avatar_url: fileToDelete })
                     }).catch(() => null);
 
-                    // 2. Искусственная задержка (400мс), чтобы ОС точно успела стереть старый файл с диска
+                    // 2. Искусственная задержка, чтобы ОС точно успела стереть старый файл
                     await new Promise(resolve => setTimeout(resolve, 400));
 
                     // 3. Загружаем чистую версию
@@ -349,7 +369,6 @@ async function executeSyncAction(action, token) {
                     await fetch('/api/characters/import', { method: 'POST', headers: formHeaders, body: fd });
                 } catch (e) { console.error(`Ошибка импорта персонажа ${char.avatar}`, e); }
             }
-
             // --- ИМПОРТ МИРОВ ---
             const worldsList = await pfs.readdir(`${dir}/worlds`).catch(() => []);
             for (const file of worldsList.filter(validateWorldFileName)) {
