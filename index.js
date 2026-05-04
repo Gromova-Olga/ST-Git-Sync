@@ -36,6 +36,90 @@ function setSyncLock(isLocked) {
     });
 }
 
+// --- КРИПТО: шифрование токена через Web Crypto API ---
+// Ключ деривируется из userAgent + origin — токен не хранится в открытом виде.
+
+async function _deriveKey() {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        enc.encode(navigator.userAgent + location.origin),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: enc.encode('st-git-sync-v1'), iterations: 100000, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+async function encryptToken(token) {
+    const enc = new TextEncoder();
+    const key = await _deriveKey();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(token));
+    return JSON.stringify({ iv: Array.from(iv), data: Array.from(new Uint8Array(encrypted)) });
+}
+
+async function decryptToken(stored) {
+    try {
+        const { iv, data } = JSON.parse(stored);
+        const key = await _deriveKey();
+        const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(iv) },
+            key,
+            new Uint8Array(data)
+        );
+        return new TextDecoder().decode(decrypted);
+    } catch (e) {
+        console.warn('[ST-Git-Sync] Не удалось расшифровать токен (возможно, сохранён в старом формате):', e.message);
+        return null;
+    }
+}
+
+// --- ВАЛИДАЦИЯ ДАННЫХ ИЗ РЕПОЗИТОРИЯ ---
+
+function validateCharacter(char) {
+    if (!char || typeof char !== 'object') return false;
+    if (typeof char.avatar !== 'string') return false;
+    // Защита от path traversal: запрещаем опасные конструкции, разрешаем Unicode
+    if (/[\/\\<>:"|?*\x00]/.test(char.avatar) || char.avatar.includes('..')) {
+        console.warn('[ST-Git-Sync] Пропущен персонаж с подозрительным avatar: ' + char.avatar);
+        return false;
+    }
+    if (!/\.(png|webp)$/i.test(char.avatar)) {
+        console.warn('[ST-Git-Sync] Пропущен персонаж с подозрительным avatar: ' + char.avatar);
+        return false;
+    }
+    return true;
+}
+
+function validateChatMessage(msg) {
+    if (!msg || typeof msg !== 'object') return false;
+    if (typeof msg.name !== 'string') return false;
+    if (typeof msg.mes !== 'string') return false;
+    return true;
+}
+
+function validateWorldFileName(name) {
+    // Запрещаем опасные конструкции, разрешаем Unicode, скобки, пробелы
+    if (/[\/\\<>:"|?*\x00]/.test(name) || name.includes('..')) {
+        console.warn('[ST-Git-Sync] Пропущен файл мира с подозрительным именем: ' + name);
+        return false;
+    }
+    if (!/.json$/i.test(name)) {
+        console.warn('[ST-Git-Sync] Пропущен файл мира с подозрительным именем: ' + name);
+        return false;
+    }
+    return true;
+}
+
+// --- АВТОРИЗАЦИЯ GITHUB ---
+
 async function validateGitHubToken(token) {
     try {
         $('#sync-log').text('Проверка прав доступа GitHub...').css('color', '#fff');
@@ -52,6 +136,8 @@ async function validateGitHubToken(token) {
         return false;
     }
 }
+
+// --- ИНИЦИАЛИЗАЦИЯ ---
 
 async function initExtension() {
     try {
@@ -77,22 +163,45 @@ async function initExtension() {
     $('#sync-repo-url').val(settings.repoUrl);
     $('#sync-remember-token').prop('checked', settings.rememberToken);
 
-    if (settings.rememberToken) {
-        $('#sync-token').val(settings.persistentToken);
-        updateIndicator(true);
+    if (settings.rememberToken && settings.persistentToken) {
+        // Пробуем расшифровать; если не вышло — токен был в старом формате, сбрасываем
+        const decrypted = await decryptToken(settings.persistentToken);
+        if (decrypted) {
+            $('#sync-token').val(decrypted);
+            updateIndicator(true);
+        } else {
+            // Старый незашифрованный токен — показываем как есть, но помечаем что нужно пересохранить
+            $('#sync-token').val(settings.persistentToken);
+            updateIndicator(true);
+            toastr.warning('Токен сохранён в устаревшем формате. Нажмите «Сохранить настройки» для обновления.');
+        }
     }
 
     // --- ОБРАБОТЧИКИ КНОПОК ---
 
-    $('#sync-save-settings').on('click', () => {
+    $('#sync-save-settings').on('click', async () => {
         settings.repoUrl = $('#sync-repo-url').val();
         settings.rememberToken = $('#sync-remember-token').prop('checked');
-        
-        if (settings.rememberToken) {
-            settings.persistentToken = $('#sync-token').val();
+
+        // Предупреждение о публичном репозитории
+        const repoUrl = settings.repoUrl.toLowerCase();
+        if (repoUrl && !repoUrl.includes('private') && repoUrl.includes('github.com')) {
+            const confirmed = confirm(
+                '⚠️ Убедитесь, что репозиторий приватный!\n\n' +
+                'Туда будут загружены ваши чаты, карточки персонажей и лорбуки. ' +
+                'Публичный репозиторий сделает их доступными всем.\n\nПродолжить?'
+            );
+            if (!confirmed) return;
+        }
+
+        const rawToken = $('#sync-token').val();
+
+        if (settings.rememberToken && rawToken) {
+            // Шифруем токен перед сохранением
+            settings.persistentToken = await encryptToken(rawToken);
             sessionToken = null;
         } else {
-            sessionToken = $('#sync-token').val();
+            sessionToken = rawToken || null;
             settings.persistentToken = '';
         }
 
@@ -127,9 +236,15 @@ async function initExtension() {
 
 async function getToken() {
     const settings = extension_settings[extensionName];
-    if (settings.rememberToken && settings.persistentToken) return settings.persistentToken;
+
+    if (settings.rememberToken && settings.persistentToken) {
+        const decrypted = await decryptToken(settings.persistentToken);
+        // Фоллбэк на нешифрованный токен (старый формат)
+        return decrypted || settings.persistentToken;
+    }
+
     if (sessionToken) return sessionToken;
-    
+
     const input = await callGenericPopup('Введите GitHub Token для этой сессии:', 'password');
     if (input) {
         sessionToken = input;
@@ -145,10 +260,12 @@ function updateIndicator(active) {
     $('#sync-log').text(active ? 'Токен активен' : 'Требуется токен');
 }
 
+// --- ОСНОВНАЯ ЛОГИКА SYNC ---
+
 async function executeSyncAction(action, token) {
     const repoUrl = extension_settings[extensionName].repoUrl;
     const dir = '/sillytavern-sync';
-    
+
     if (!repoUrl) return toastr.error('Введите URL репозитория!');
 
     setSyncLock(true);
@@ -161,16 +278,25 @@ async function executeSyncAction(action, token) {
         if (key.toLowerCase() !== 'content-type') formHeaders[key] = value;
     }
 
+    // onAuth-коллбэк — токен передаётся в заголовке, а не в URL
+    if (!token) { toastr.error('Токен пустой, операция отменена'); setSyncLock(false); return; }
+    console.log('[ST-Git-Sync] Токен получен, длина:', token.length);
+    const onAuth = () => ({ username: token, password: '' });
+
     try {
         const hasGit = await pfs.stat(dir + '/.git').catch(() => false);
-        
+
         if (!hasGit) {
             $('#sync-log').text('Клонирование репозитория...');
             await git.clone({
                 fs, http: GitHttp, dir,
                 url: repoUrl,
                 corsProxy: 'https://cors.isomorphic-git.org',
-                onAuth: () => ({ username: token }),
+                onAuth,
+                onAuthFailure: (url, auth) => {
+                    console.error('[ST-Git-Sync] onAuthFailure при clone:', url, '| username:', auth?.username ? 'есть' : 'ПУСТОЙ');
+                    return { cancel: true };
+                },
                 singleBranch: true, depth: 1
             });
         }
@@ -181,7 +307,11 @@ async function executeSyncAction(action, token) {
                 fs, http: GitHttp, dir,
                 url: repoUrl,
                 corsProxy: 'https://cors.isomorphic-git.org',
-                onAuth: () => ({ username: token, password: '' }),
+                onAuth,
+                onAuthFailure: (url, auth) => {
+                    console.error('[ST-Git-Sync] onAuthFailure при pull:', url, '| username:', auth?.username ? 'есть' : 'ПУСТОЙ');
+                    return { cancel: true };
+                },
                 author: { name: 'ST User', email: 'user@st.local' }
             });
 
@@ -190,12 +320,17 @@ async function executeSyncAction(action, token) {
             let charsData = JSON.parse(charsFile);
             if (!Array.isArray(charsData)) charsData = Object.values(charsData);
 
-            for (const char of charsData) {
-                if (!char.avatar) continue;
+            // Валидация: пропускаем персонажей с подозрительными данными
+            const validChars = charsData.filter(validateCharacter);
+            if (validChars.length !== charsData.length) {
+                toastr.warning(`Пропущено ${charsData.length - validChars.length} персонажей с некорректными данными`);
+            }
+
+            for (const char of validChars) {
                 try {
                     const rawData = await pfs.readFile(`${dir}/characters/${char.avatar}`);
                     const uint8Array = rawData instanceof Uint8Array ? rawData : new Uint8Array(Object.values(rawData));
-                    
+
                     const fd = new FormData();
                     fd.append('avatar', new Blob([uint8Array]), char.avatar);
                     fd.append('file_type', char.avatar.endsWith('.webp') ? 'webp' : 'png');
@@ -206,7 +341,7 @@ async function executeSyncAction(action, token) {
 
             // --- ИМПОРТ МИРОВ ---
             const worldsList = await pfs.readdir(`${dir}/worlds`).catch(() => []);
-            for (const file of worldsList) {
+            for (const file of worldsList.filter(validateWorldFileName)) {
                 try {
                     const rawData = await pfs.readFile(`${dir}/worlds/${file}`);
                     const fd = new FormData();
@@ -219,7 +354,7 @@ async function executeSyncAction(action, token) {
             const charFolders = await pfs.readdir(`${dir}/chats`).catch(() => []);
             for (const charFolderName of charFolders) {
                 const charChats = await pfs.readdir(`${dir}/chats/${charFolderName}`).catch(() => []);
-                const charInfo = charsData.find(c => c.name === charFolderName);
+                const charInfo = validChars.find(c => c.name === charFolderName);
                 const avatarUrl = String(charInfo ? charInfo.avatar : `${charFolderName}.png`);
 
                 for (const chatFile of charChats) {
@@ -227,16 +362,19 @@ async function executeSyncAction(action, token) {
                         const rawData = await pfs.readFile(`${dir}/chats/${charFolderName}/${chatFile}`, 'utf8');
                         const lines = rawData.split('\n').filter(line => line.trim());
                         const chatData = lines.map(line => {
-                            try { return JSON.parse(line); } catch(e) { return null; }
+                            try { return JSON.parse(line); } catch (e) { return null; }
                         }).filter(x => x !== null);
 
-                        if (chatData.length === 0) continue;
+                        // Валидация: фильтруем невалидные сообщения
+                        const validMessages = chatData.filter(validateChatMessage);
+
+                        if (validMessages.length === 0) continue;
 
                         await fetch('/api/chats/save', {
                             method: 'POST', headers: jsonHeaders,
                             body: JSON.stringify({
                                 avatar_url: avatarUrl,
-                                chat: chatData,
+                                chat: validMessages,
                                 file_name: chatFile.replace(/\.jsonl$/i, ''),
                                 force: true
                             })
@@ -250,14 +388,13 @@ async function executeSyncAction(action, token) {
 
         } else if (action === 'push') {
             $('#sync-log').text('Сбор данных...');
-            
+
             // Персонажи
             const charsReq = await fetch('/api/characters/all', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({}) });
             const charsData = await charsReq.json();
             await pfs.mkdir(`${dir}/characters`).catch(() => {});
-            
-            for (const char of charsData) {
-                if (!char.avatar) continue;
+
+            for (const char of charsData.filter(validateCharacter)) {
                 const avatarReq = await fetch(`/characters/${encodeURIComponent(char.avatar)}`, { headers: baseHeaders });
                 if (avatarReq.ok) {
                     await pfs.writeFile(`${dir}/characters/${char.avatar}`, new Uint8Array(await avatarReq.arrayBuffer()));
@@ -267,15 +404,16 @@ async function executeSyncAction(action, token) {
             await pfs.writeFile(`${dir}/characters.json`, JSON.stringify(charsData, null, 2));
             await git.add({ fs, dir, filepath: 'characters.json' });
 
-            // Миры (Логика исправлена)
+            // Миры
             await pfs.mkdir(`${dir}/worlds`).catch(() => {});
-            $('#world_editor_select option').each(async function() {
+            $('#world_editor_select option').each(async function () {
                 const txt = $(this).text().trim();
                 if (txt && !txt.includes('Select') && !txt.includes('No worlds') && !txt.includes('Выберите') && !txt.startsWith('---') && !/^\d+$/.test(txt)) {
                     const wReq = await fetch('/api/worldinfo/get', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ name: txt }) });
                     if (wReq.ok) {
                         const worldContent = await wReq.json();
                         const safeFileName = txt.toLowerCase().endsWith('.json') ? txt : `${txt}.json`;
+                        if (!validateWorldFileName(safeFileName)) return;
                         await pfs.writeFile(`${dir}/worlds/${safeFileName}`, new TextEncoder().encode(JSON.stringify(worldContent, null, 2)));
                         await git.add({ fs, dir, filepath: `worlds/${safeFileName}` });
                     }
@@ -284,14 +422,13 @@ async function executeSyncAction(action, token) {
 
             // Чаты
             await pfs.mkdir(`${dir}/chats`).catch(() => {});
-            for (const char of charsData) {
-                if (!char.avatar) continue;
+            for (const char of charsData.filter(validateCharacter)) {
                 const chatsReq = await fetch('/api/characters/chats', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ avatar_url: char.avatar }) });
                 if (chatsReq.ok) {
                     const chats = await chatsReq.json();
                     const folderName = char.avatar.replace(/\.(png|webp)$/i, '');
                     await pfs.mkdir(`${dir}/chats/${folderName}`).catch(() => {});
-                    
+
                     for (const chat of chats) {
                         if (!chat.file_name) continue;
                         const cReq = await fetch('/api/chats/get', {
@@ -314,25 +451,39 @@ async function executeSyncAction(action, token) {
 
             $('#sync-log').text('Коммит и отправка...');
             await git.commit({
-                fs, dir, message: `Auto-sync: ${new Date().toLocaleString()}`,
+                fs, dir,
+                message: `Auto-sync: ${new Date().toLocaleString()}`,
                 author: { name: 'ST User', email: 'user@st.local' }
             });
 
+            // FIX: токен передаётся через onAuth, а не встраивается в URL
             await git.push({
                 fs, http: GitHttp, dir,
-                url: repoUrl.replace('https://', `https://${token}@`),
+                url: repoUrl,
                 corsProxy: 'https://cors.isomorphic-git.org',
+                onAuth,
+                onAuthFailure: (url, auth) => {
+                    console.error('[ST-Git-Sync] onAuthFailure при push:', url, '| username:', auth?.username ? 'есть' : 'ПУСТОЙ');
+                    return { cancel: true };
+                },
                 force: true
             });
+
             $('#sync-log').text('Push успешен!').css('color', '#4CAF50');
             toastr.success('Данные на GitHub!');
         }
+
     } catch (err) {
         console.error('Git Error:', err);
         toastr.error(`Ошибка: ${err.message}`);
         $('#sync-log').text('Ошибка. См. консоль (F12)').css('color', '#f44336');
     } finally {
         setSyncLock(false);
+
+        // Очищаем токен из памяти после операции, если он не сохранён постоянно
+        if (!extension_settings[extensionName].rememberToken) {
+            sessionToken = null;
+        }
     }
 }
 
