@@ -1,17 +1,21 @@
-<div class="github-sync-wrapper" style="padding: 15px; border: 1px solid #444; border-radius: 8px; background: rgba(0,0,0,0.2); margin: 10px 0;">
-    
-    <!-- Заголовок (теперь это кнопка для сворачивания) -->
-    <div id="sync-toggle-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; cursor: pointer; user-select: none;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <span id="sync-chevron" style="font-size: 0.8em; color: #aaa; transition: transform 0.2s;">▼</span>
-            <h4 style="margin: 0;">📦 GitHub Sync</h4>
+<div class="github-sync-settings-container" style="margin: 10px 0;">
+    <div class="inline-drawer">
+        
+        <!-- Заголовок, на который кликаем -->
+        <div class="inline-drawer-toggle inline-drawer-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <b>📦 GitHub Sync</b>
+            </div>
+            <!-- Блок с индикатором и стрелочкой -->
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div id="sync-auth-indicator" style="width: 10px; height: 10px; border-radius: 50%; background: #555;" title="Статус авторизации"></div>
+                <div class="inline-drawer-icon fa-solid fa-chevron-down down"></div>
+            </div>
         </div>
-        <div id="sync-auth-indicator" style="width: 12px; height: 12px; border-radius: 50%; background: #555;" title="Статус авторизации"></div>
-    </div>
 
-    <!-- Основной контент (скрывается/показывается) -->
-    <div id="sync-main-content" style="padding-top: 10px;">
-        <div id="sync-config-area">
+        <!-- Контент, который сворачивается -->
+        <div class="inline-drawer-content" style="padding:15px; border: 1px solid #444; border-top: none; background: rgba(0,0,0,0.2);">
+            
             <label style="font-size: 0.8em; color: #aaa;">URL репозитория:</label>
             <input type="text" id="sync-repo-url" placeholder="https://github.com/user/repo.git" style="width: 100%; margin-bottom: 10px; background: #111; color: #eee; border: 1px solid #555; padding: 5px;">
 
@@ -26,20 +30,20 @@
             </div>
 
             <button id="sync-save-settings" class="menu_button" style="width: 100%; font-size: 0.85em;">Сохранить настройки</button>
+
+            <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
+
+            <div style="display: flex; gap: 10px;">
+                <button id="sync-pull-btn" class="menu_button" style="flex: 1; background: #2c3e50;">📥 Скачать (Pull)</button>
+                <button id="sync-push-btn" class="menu_button" style="flex: 1; background: #27ae60;">📤 Отправить (Push)</button>
+            </div>
+
+            <div id="sync-log" style="margin-top: 10px; margin-bottom: 15px; font-size: 0.75em; color: #888; text-align: center; font-family: monospace;">Ожидание...</div>
+
+            <button id="sync-hard-reset-btn" class="menu_button" style="width: 100%; font-size: 0.8em; background: rgba(231, 76, 60, 0.2); border: 1px solid #e74c3c; color: #e74c3c;">
+                ⚠️ Очистить локальный кэш Git
+            </button>
         </div>
 
-        <hr style="border: 0; border-top: 1px solid #444; margin: 15px 0;">
-
-        <div style="display: flex; gap: 10px;">
-            <button id="sync-pull-btn" class="menu_button" style="flex: 1; background: #2c3e50;">📥 Скачать (Pull)</button>
-            <button id="sync-push-btn" class="menu_button" style="flex: 1; background: #27ae60;">📤 Отправить (Push)</button>
-        </div>
-
-        <div id="sync-log" style="margin-top: 10px; margin-bottom: 15px; font-size: 0.75em; color: #888; text-align: center; font-family: monospace;">Ожидание...</div>
-
-        <!-- Та самая кнопка сброса -->
-        <button id="sync-hard-reset-btn" class="menu_button" style="width: 100%; font-size: 0.8em; background: rgba(231, 76, 60, 0.2); border: 1px solid #e74c3c; color: #e74c3c;">
-            ⚠️ Очистить локальный кэш Git
-        </button>
     </div>
 </div>
