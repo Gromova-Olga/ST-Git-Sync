@@ -309,33 +309,27 @@ async function executeSyncAction(action, token) {
                 await pfs.mkdir(`${dir}/worlds`).catch(() => {});
                 
                 let worlds = [];
-                // Берем из глобальной переменной, защищаясь от объектов вместо строк
-                if (window.world_names && Array.isArray(window.world_names)) {
-                    worlds = window.world_names.map(w => typeof w === 'object' ? w.name : w);
-                }
                 
-                // Запасной вариант: парсим меню (исправлено)
-                if (worlds.length === 0) {
-                    $('#world_editor_select option').each(function() {
-                        const val = $(this).attr('value'); // Надежнее брать value, а не текст
-                        const txt = $(this).text().trim();
+                // Надежный парсинг прямо из меню
+                $('#world_editor_select option').each(function() {
+                    const txt = $(this).text().trim();
+                    
+                    // Игнорируем служебные плейсхолдеры
+                    if (txt && 
+                        !txt.includes('Select') && 
+                        !txt.includes('No worlds') && 
+                        !txt.includes('Выберите') && 
+                        !txt.startsWith('---')) {
                         
-                        // Игнорируем английские и русские плейсхолдеры, а также разделители
-                        if (val && txt && 
-                            !txt.includes('Select') && 
-                            !txt.includes('No worlds') && 
-                            !txt.includes('Выберите') && 
-                            !txt.startsWith('---')) {
-                            worlds.push(val);
+                        // Отсекаем багованные одиночные цифры (0, 1, 2...), которые ST отдает как индексы массива
+                        if (!/^\d+$/.test(txt)) {
+                            worlds.push(txt);
                         }
-                    });
-                }
-                
-                // Финальная очистка: убираем дубликаты, пустые значения и мусорные индексы (0, 1, 2...)
-                worlds = [...new Set(worlds)].filter(w => {
-                    const isArrayIndexBug = typeof w === 'string' && w.length < 3 && !isNaN(w); 
-                    return w && typeof w === 'string' && !w.startsWith('---') && !isArrayIndexBug;
+                    }
                 });
+                
+                // Убираем дубликаты на всякий случай
+                worlds = [...new Set(worlds)];
                 
                 for (const worldName of worlds) {
                     const wReq = await fetch('/api/worldinfo/get', { 
@@ -344,6 +338,7 @@ async function executeSyncAction(action, token) {
                     
                     if (wReq.ok) {
                         const worldContent = await wReq.json();
+                        // Проверяем, что сервер вернул реальные данные лорбука
                         if (worldContent && Object.keys(worldContent).length > 0) {
                             const jsonString = JSON.stringify(worldContent, null, 2);
                             const uint8 = new TextEncoder().encode(jsonString);
@@ -354,7 +349,7 @@ async function executeSyncAction(action, token) {
                         }
                     }
                 }
-            } catch (e) { console.error('❌ Ошибка парсинга миров:', e); }
+            } catch (e) { console.error('Ошибка парсинга миров:', e); }
 
             // === СБОР ГРУППОВЫХ ЧАТОВ ===
             $('#sync-log').text('Сбор групповых чатов...');
