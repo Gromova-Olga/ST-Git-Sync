@@ -331,13 +331,17 @@ async function executeSyncAction(action, token) {
                     const rawData = await pfs.readFile(`${dir}/characters/${char.avatar}`);
                     const uint8Array = rawData instanceof Uint8Array ? rawData : new Uint8Array(Object.values(rawData));
 
-                    // ВОЗВРАЩАЕМ УДАЛЕНИЕ СТАРОЙ ВЕРСИИ ПЕРЕД ИМПОРТОМ
+                    // 1. Отправляем запрос на удаление
                     await fetch('/api/characters/delete', {
                         method: 'POST',
                         headers: jsonHeaders,
                         body: JSON.stringify({ avatar_url: char.avatar })
-                    }).catch(() => {});
+                    }).catch(() => null);
 
+                    // 2. Искусственная задержка (400мс), чтобы ОС точно успела стереть старый файл с диска
+                    await new Promise(resolve => setTimeout(resolve, 400));
+
+                    // 3. Загружаем чистую версию
                     const fd = new FormData();
                     fd.append('avatar', new Blob([uint8Array]), char.avatar);
                     fd.append('file_type', char.avatar.endsWith('.webp') ? 'webp' : 'png');
