@@ -141,14 +141,12 @@ async function validateGitHubToken(token) {
 
 async function initExtension() {
     try {
-        // 1. Загружаем Buffer (необходим для работы новых версий Git в браузере)
+        // 1. Загружаем ПРАВИЛЬНЫЙ Buffer
         await loadLibrary(`${extensionFolderPath}/buffer.min.js`);
         
-        // Пробрасываем Buffer в глобальную область видимости
-        if (window.buffer) {
-            window.Buffer = window.buffer.Buffer;
-        } else if (!window.Buffer && typeof require === 'function') {
-            try { window.Buffer = require('buffer').Buffer; } catch (e) {}
+        // Жестко привязываем Buffer, переопределяя любые другие переменные
+        if (typeof buffer !== 'undefined' && buffer.Buffer) {
+            window.Buffer = buffer.Buffer;
         }
 
         // 2. Загружаем остальные библиотеки
@@ -164,19 +162,17 @@ async function initExtension() {
     fs = new LightningFS('fs');
     pfs = fs.promises;
 
-    // Настройка объектов Git и GitHttp для версии 1.37.6
+    // Настройка объектов Git и GitHttp
     git = window.isomorphicGit || window.git;
-    GitHttp = window.GitHttp;
-
-    // Дополнительная проверка экспорта
     if (!git && window.isomorphicGit && window.isomorphicGit.default) {
         git = window.isomorphicGit.default;
     }
+    GitHttp = window.GitHttp;
 
-    // Финальная проверка работоспособности
-    if (!git || !GitHttp) {
-        console.error('[ST-Git-Sync] Критическая ошибка: библиотеки не найдены в window!', { git, GitHttp });
-        return toastr.error('Ошибка инициализации Git. Проверьте консоль (F12).');
+    // Железобетонная проверка: всё ли загрузилось правильно?
+    if (!git || !GitHttp || !window.Buffer || typeof window.Buffer.isBuffer !== 'function') {
+        console.error('[ST-Git-Sync] Ошибка загрузки компонентов!', { git, GitHttp, Buffer: window.Buffer });
+        return toastr.error('Критическая ошибка: библиотеки не загрузились. Проверьте консоль (F12).');
     }
 
     // Загрузка интерфейса настроек
