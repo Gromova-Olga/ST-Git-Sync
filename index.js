@@ -476,12 +476,24 @@ async function executeSyncAction(action, token) {
             for (const char of charsData.filter(validateCharacter)) {
                 const chatsReq = await fetch('/api/characters/chats', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ avatar_url: char.avatar }) });
                 if (chatsReq.ok) {
-                    const chats = await chatsReq.json();
+                    let chats = await chatsReq.json();
+                    
+                    // --- БЕЗОПАСНОЕ ПРЕОБРАЗОВАНИЕ (ИСПРАВЛЕНИЕ ОШИБКИ chats is not iterable) ---
+                    if (!Array.isArray(chats)) {
+                        if (chats && Array.isArray(chats.data)) {
+                            chats = chats.data;
+                        } else if (chats && typeof chats === 'object') {
+                            chats = Object.values(chats);
+                        } else {
+                            chats = [];
+                        }
+                    }
+
                     const folderName = char.avatar.replace(/\.(png|webp)$/i, '');
                     await pfs.mkdir(`${dir}/chats/${folderName}`).catch(() => {});
 
                     for (const chat of chats) {
-                        if (!chat.file_name) continue;
+                        if (!chat || !chat.file_name) continue;
                         const cReq = await fetch('/api/chats/get', {
                             method: 'POST', headers: jsonHeaders,
                             body: JSON.stringify({ ch_name: folderName, file_name: chat.file_name.replace(/\.jsonl$/i, ''), avatar_url: char.avatar })
@@ -499,7 +511,6 @@ async function executeSyncAction(action, token) {
                     }
                 }
             }
-
             $('#sync-log').text('Коммит и отправка...');
             await git.commit({
                 fs, dir,
