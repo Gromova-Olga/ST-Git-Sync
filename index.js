@@ -202,7 +202,6 @@ async function initExtension() {
             toastr.warning('Токен сохранён в устаревшем формате. Пересохраните настройки.');
         }
     }
-}
     // --- ОБРАБОТЧИКИ КНОПОК ---
 
     $('#sync-save-settings').on('click', async () => {
