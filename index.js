@@ -141,7 +141,7 @@ async function validateGitHubToken(token) {
 
 async function initExtension() {
     try {
-        // 1. Загружаем Buffer первым (необходим для работы новых версий Git в браузере)
+        // 1. Загружаем Buffer (необходим для работы новых версий Git в браузере)
         await loadLibrary(`${extensionFolderPath}/buffer.min.js`);
         
         // Пробрасываем Buffer в глобальную область видимости
@@ -151,20 +151,20 @@ async function initExtension() {
             try { window.Buffer = require('buffer').Buffer; } catch (e) {}
         }
 
-        // 2. Загружаем остальные библиотеки[cite: 2]
+        // 2. Загружаем остальные библиотеки
         await loadLibrary(`${extensionFolderPath}/lightning-fs.min.js`);
         await loadLibrary(`${extensionFolderPath}/isomorphic-git.min.js`);
         await loadLibrary(`${extensionFolderPath}/isomorphic-git-http.min.js`);
     } catch (e) {
-        console.error('[ST-Git-Sync] Не удалось загрузить библиотеки Git!', e);[cite: 2]
-        return toastr.error('Отсутствуют файлы библиотек. Проверьте установку.');[cite: 2]
+        console.error('[ST-Git-Sync] Не удалось загрузить библиотеки Git!', e);
+        return toastr.error('Отсутствуют файлы библиотек. Проверьте установку.');
     }
 
-    // Инициализация эмулятора файловой системы[cite: 2, 6]
+    // Инициализация эмулятора файловой системы
     fs = new LightningFS('fs');
     pfs = fs.promises;
 
-    // Настройка объектов Git и GitHttp для версии 1.37.6[cite: 2, 5, 7]
+    // Настройка объектов Git и GitHttp для версии 1.37.6
     git = window.isomorphicGit || window.git;
     GitHttp = window.GitHttp;
 
@@ -173,30 +173,30 @@ async function initExtension() {
         git = window.isomorphicGit.default;
     }
 
-    // Финальная проверка работоспособности[cite: 2]
+    // Финальная проверка работоспособности
     if (!git || !GitHttp) {
         console.error('[ST-Git-Sync] Критическая ошибка: библиотеки не найдены в window!', { git, GitHttp });
         return toastr.error('Ошибка инициализации Git. Проверьте консоль (F12).');
     }
 
-    // Загрузка интерфейса настроек[cite: 2]
+    // Загрузка интерфейса настроек
     const response = await fetch(`${extensionFolderPath}/example.html`);
     if (!response.ok) return console.error(`Ошибка загрузки HTML: ${response.status}`);
 
     $('#extensions_settings2').append(await response.text());
 
-    const settings = extension_settings[extensionName];[cite: 2]
+    const settings = extension_settings[extensionName];
     $('#sync-repo-url').val(settings.repoUrl);
     $('#sync-remember-token').prop('checked', settings.rememberToken);
 
-    if (settings.rememberToken && settings.persistentToken) {[cite: 2]
-        // Дешифровка токена[cite: 2]
+    if (settings.rememberToken && settings.persistentToken) {
+        // Дешифровка токена
         const decrypted = await decryptToken(settings.persistentToken);
         if (decrypted) {
             $('#sync-token').val(decrypted);
             updateIndicator(true);
         } else {
-            // Поддержка старого формата[cite: 2]
+            // Поддержка старого формата
             $('#sync-token').val(settings.persistentToken);
             updateIndicator(true);
             toastr.warning('Токен сохранён в устаревшем формате. Пересохраните настройки.');
