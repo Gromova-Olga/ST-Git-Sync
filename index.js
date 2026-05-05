@@ -153,18 +153,21 @@ async function initExtension() {
     fs = new LightningFS('fs');
     pfs = fs.promises;
 
-    // Расширенный поиск объекта git для поддержки новых версий (1.37.6+)[cite: 2, 7]
-    git = window.isomorphicGit || window.git || (window.default && window.default.add ? window.default : null);
+    // Исправленный поиск для UMD-сборки 1.37.6
+    git = window.isomorphicGit || window.git;
     
     // Поиск объекта GitHttp[cite: 2, 5]
-    GitHttp = window.GitHttp || (window.GitHttp ? window.GitHttp : null);
+    GitHttp = window.GitHttp;
 
-    // Защита от дурака: проверяем, что объект git реально существует
-    if (!git) {
-        console.error('[ST-Git-Sync] Библиотека git не найдена в объекте window!', window);
-        return toastr.error('Критическая ошибка: библиотека Git не загружена корректно');
+    // Если вдруг библиотека упаковалась странно, проверяем внутренний экспорт
+    if (!git && window.isomorphicGit && window.isomorphicGit.default) {
+        git = window.isomorphicGit.default;
     }
 
+    if (!git) {
+        console.error('[ST-Git-Sync] Библиотека git не найдена!', window);
+        return toastr.error('Критическая ошибка: объект git не инициализирован. Проверьте формат файла.');
+    }
     const response = await fetch(`${extensionFolderPath}/example.html`);
     if (!response.ok) return console.error(`Ошибка загрузки HTML: ${response.status}`);
 
