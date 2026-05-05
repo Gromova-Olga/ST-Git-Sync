@@ -141,56 +141,68 @@ async function validateGitHubToken(token) {
 
 async function initExtension() {
     try {
+        // 1. Загружаем Buffer первым (необходим для работы новых версий Git в браузере)
+        await loadLibrary(`${extensionFolderPath}/buffer.min.js`);
+        
+        // Пробрасываем Buffer в глобальную область видимости
+        if (window.buffer) {
+            window.Buffer = window.buffer.Buffer;
+        } else if (!window.Buffer && typeof require === 'function') {
+            try { window.Buffer = require('buffer').Buffer; } catch (e) {}
+        }
+
+        // 2. Загружаем остальные библиотеки[cite: 2]
         await loadLibrary(`${extensionFolderPath}/lightning-fs.min.js`);
         await loadLibrary(`${extensionFolderPath}/isomorphic-git.min.js`);
         await loadLibrary(`${extensionFolderPath}/isomorphic-git-http.min.js`);
     } catch (e) {
-        console.error('Не удалось загрузить библиотеки Git!', e);
-        return toastr.error('Отсутствуют файлы библиотек');
+        console.error('[ST-Git-Sync] Не удалось загрузить библиотеки Git!', e);[cite: 2]
+        return toastr.error('Отсутствуют файлы библиотек. Проверьте установку.');[cite: 2]
     }
 
-    // Инициализация файловой системы[cite: 2, 6]
+    // Инициализация эмулятора файловой системы[cite: 2, 6]
     fs = new LightningFS('fs');
     pfs = fs.promises;
 
-    // Исправленный поиск для UMD-сборки 1.37.6
+    // Настройка объектов Git и GitHttp для версии 1.37.6[cite: 2, 5, 7]
     git = window.isomorphicGit || window.git;
-    
-    // Поиск объекта GitHttp[cite: 2, 5]
     GitHttp = window.GitHttp;
 
-    // Если вдруг библиотека упаковалась странно, проверяем внутренний экспорт
+    // Дополнительная проверка экспорта
     if (!git && window.isomorphicGit && window.isomorphicGit.default) {
         git = window.isomorphicGit.default;
     }
 
-    if (!git) {
-        console.error('[ST-Git-Sync] Библиотека git не найдена!', window);
-        return toastr.error('Критическая ошибка: объект git не инициализирован. Проверьте формат файла.');
+    // Финальная проверка работоспособности[cite: 2]
+    if (!git || !GitHttp) {
+        console.error('[ST-Git-Sync] Критическая ошибка: библиотеки не найдены в window!', { git, GitHttp });
+        return toastr.error('Ошибка инициализации Git. Проверьте консоль (F12).');
     }
+
+    // Загрузка интерфейса настроек[cite: 2]
     const response = await fetch(`${extensionFolderPath}/example.html`);
     if (!response.ok) return console.error(`Ошибка загрузки HTML: ${response.status}`);
 
     $('#extensions_settings2').append(await response.text());
 
-    const settings = extension_settings[extensionName];
+    const settings = extension_settings[extensionName];[cite: 2]
     $('#sync-repo-url').val(settings.repoUrl);
     $('#sync-remember-token').prop('checked', settings.rememberToken);
 
-    if (settings.rememberToken && settings.persistentToken) {
-        // Пробуем расшифровать; если не вышло — токен был в старом формате, сбрасываем
+    if (settings.rememberToken && settings.persistentToken) {[cite: 2]
+        // Дешифровка токена[cite: 2]
         const decrypted = await decryptToken(settings.persistentToken);
         if (decrypted) {
             $('#sync-token').val(decrypted);
             updateIndicator(true);
         } else {
-            // Старый незашифрованный токен — показываем как есть, но помечаем что нужно пересохранить
+            // Поддержка старого формата[cite: 2]
             $('#sync-token').val(settings.persistentToken);
             updateIndicator(true);
-            toastr.warning('Токен сохранён в устаревшем формате. Нажмите «Сохранить настройки» для обновления.');
+            toastr.warning('Токен сохранён в устаревшем формате. Пересохраните настройки.');
         }
     }
-
+}
     // --- ОБРАБОТЧИКИ КНОПОК ---
 
     $('#sync-save-settings').on('click', async () => {
