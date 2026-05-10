@@ -307,25 +307,35 @@ async function executeSyncAction(action, token) {
         if (key.toLowerCase() !== 'content-type') formHeaders[key] = value;
     }
 
-    // onAuth-коллбэк — токен передаётся в заголовке, а не в URL
+    // Токен встраивается прямо в URL — единственный надёжный способ через cors-прокси
     if (!token) { toastr.error('Токен пустой, операция отменена'); setSyncLock(false); return; }
     console.log('[ST-Git-Sync] Токен получен, длина:', token.length);
-    const onAuth = () => ({ username: token, password: '' });
+    let authenticatedUrl = repoUrl;
+    try {
+        const parsed = new URL(repoUrl);
+        parsed.username = token;
+        parsed.password = '';
+        authenticatedUrl = parsed.toString();
+    } catch (e) {
+        toastr.error('Некорректный URL репозитория');
+        setSyncLock(false);
+        return;
+    }
 
     try {
         const hasGit = await pfs.stat(dir + '/.git').catch(() => false);
 
-        if (!hasGit) {
+        if (action === 'push') {
+            if (!hasGit) {
+                await git.init({ fs, dir, defaultBranch: 'main' });
+            }
+            await git.addRemote({ fs, dir, remote: 'origin', url: authenticatedUrl, force: true });
+        } else if (!hasGit) {
             $('#sync-log').text('Клонирование репозитория...');
             await git.clone({
                 fs, http: GitHttp, dir,
-                url: repoUrl,
+                url: authenticatedUrl,
                 corsProxy: 'https://cors.isomorphic-git.org',
-                onAuth,
-                onAuthFailure: (url, auth) => {
-                    console.error('[ST-Git-Sync] onAuthFailure при clone:', url, '| username:', auth?.username ? 'есть' : 'ПУСТОЙ');
-                    return { cancel: true };
-                },
                 singleBranch: true, depth: 1
             });
         }
@@ -336,11 +346,6 @@ async function executeSyncAction(action, token) {
                 fs, http: GitHttp, dir,
                 url: repoUrl,
                 corsProxy: 'https://cors.isomorphic-git.org',
-                onAuth,
-                onAuthFailure: (url, auth) => {
-                    console.error('[ST-Git-Sync] onAuthFailure при pull:', url, '| username:', auth?.username ? 'есть' : 'ПУСТОЙ');
-                    return { cancel: true };
-                },
                 author: { name: 'ST User', email: 'user@st.local' }
             });
 
@@ -518,17 +523,15 @@ async function executeSyncAction(action, token) {
                 author: { name: 'ST User', email: 'user@st.local' }
             });
 
-            // FIX: токен передаётся через onAuth, а не встраивается в URL
             await git.push({
                 fs, http: GitHttp, dir,
-                url: repoUrl,
+                url: authenticatedUrl,
                 corsProxy: 'https://cors.isomorphic-git.org',
-                onAuth,
-                onAuthFailure: (url, auth) => {
-                    console.error('[ST-Git-Sync] onAuthFailure при push:', url, '| username:', auth?.username ? 'есть' : 'ПУСТОЙ');
-                    return { cancel: true };
-                },
-                force: true
+                remote: 'origin',
+                ref: 'main',
+                remoteRef: 'refs/heads/main',
+                force: true,
+                onMessage: (msg) => console.log('[ST-Git-Sync] GitHub:', msg)
             });
 
             $('#sync-log').text('Push успешен!').css('color', '#4CAF50');
