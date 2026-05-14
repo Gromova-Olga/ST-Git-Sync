@@ -320,6 +320,7 @@ async function executeSyncAction(action, token) {
         // убираем возможный старый токен в URL если пользователь вставил его вручную
         const hostAndPath = withoutProto.includes('@') ? withoutProto.split('@').slice(1).join('@') : withoutProto;
         authenticatedUrl = `https://${token}@${hostAndPath}`;
+        // ВРЕМЕННАЯ ДИАГНОСТИКА — удалить после теста
     } catch (e) {
         toastr.error('Некорректный URL репозитория — нужен https://github.com/...');
         setSyncLock(false);
@@ -358,7 +359,7 @@ async function executeSyncAction(action, token) {
             $('#sync-log').text('Загрузка изменений (Pull)...');
             await git.pull({
                 fs, http: GitHttp, dir,
-                url: repoUrl,
+                url: authenticatedUrl,
                 corsProxy: 'https://cors.isomorphic-git.org',
                 author: { name: 'ST User', email: 'user@st.local' }
             });
