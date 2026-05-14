@@ -310,14 +310,18 @@ async function executeSyncAction(action, token) {
     // Токен встраивается прямо в URL — единственный надёжный способ через cors-прокси
     if (!token) { toastr.error('Токен пустой, операция отменена'); setSyncLock(false); return; }
     console.log('[ST-Git-Sync] Токен получен, длина:', token.length);
-    let authenticatedUrl = repoUrl;
+    // Строим https://TOKEN@github.com/... вручную, без URL API
+    // (URL API энкодит username по-разному в разных браузерах/движках)
+    let authenticatedUrl;
     try {
-        const parsed = new URL(repoUrl);
-        parsed.username = token;
-        parsed.password = '';
-        authenticatedUrl = parsed.toString();
+        const repoClean = repoUrl.trim().replace(/\/+$/, '');
+        if (!repoClean.startsWith('https://')) throw new Error('not https');
+        const withoutProto = repoClean.slice('https://'.length);
+        // убираем возможный старый токен в URL если пользователь вставил его вручную
+        const hostAndPath = withoutProto.includes('@') ? withoutProto.split('@').slice(1).join('@') : withoutProto;
+        authenticatedUrl = `https://${token}@${hostAndPath}`;
     } catch (e) {
-        toastr.error('Некорректный URL репозитория');
+        toastr.error('Некорректный URL репозитория — нужен https://github.com/...');
         setSyncLock(false);
         return;
     }
@@ -326,9 +330,19 @@ async function executeSyncAction(action, token) {
         const hasGit = await pfs.stat(dir + '/.git').catch(() => false);
 
         if (action === 'push') {
-            if (!hasGit) {
-                await git.init({ fs, dir, defaultBranch: 'main' });
+            // Всегда пересоздаём локальный репо для push — чтобы не тащить shallow-историю
+            // из предыдущего clone, которая ломает packfile через cors-прокси
+            if (hasGit) {
+                const rmrf = async (p) => {
+                    try {
+                        const entries = await pfs.readdir(p);
+                        for (const e of entries) await rmrf(p + '/' + e);
+                        await pfs.rmdir(p);
+                    } catch { try { await pfs.unlink(p); } catch {} }
+                };
+                await rmrf(dir + '/.git');
             }
+            await git.init({ fs, dir, defaultBranch: 'main' });
             await git.addRemote({ fs, dir, remote: 'origin', url: authenticatedUrl, force: true });
         } else if (!hasGit) {
             $('#sync-log').text('Клонирование репозитория...');
